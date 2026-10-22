@@ -1,0 +1,28 @@
+executable = /bin/bash
+arguments = run_search.sh oli_search_script.py \
+            --job-index $(Process) \
+            --num-jobs 100 \
+            --output data/shards/glitches_$(Process).h5
+
+initialdir = /home/james.neeson/Hanford_Work
+
+accounting_group_user = james.neeson
+accounting_group = ligo.dev.o4.burst.allsky.mlyoffline
+request_memory = 8G
+request_disk = 8G
+getenv = PATH,DEFAULT_SEGMENT_SERVER,GWDATAFIND_SERVER,NDSSERVER
+
+transfer_executable = false 
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+preserve_relative_paths = TRUE
+transfer_input_files = oli_search_script.py, run_search.sh, ligo.org.keytab
+transfer_output_files = data/shards
+
+log = condor/gen_data/logs/logs_$(Process).log
+output = condor/gen_data/outputs/outputs_$(Process).out
+error = condor/gen_data/errors/errors_$(Process).err
+
+max_retries = 10
+
+queue 100

@@ -1,0 +1,31 @@
+executable = /usr/bin/env
+arguments = python load_hveto.py \
+            --input hveto_triggers.txt \
+            --output data/shards/glitches_$(Process).h5 \
+            --job-index $(Process) \
+            --num-jobs 100 \
+            --ifo H1 \
+            --host nds.ligo-wa.caltech.edu 
+
+initialdir = /home/james.neeson/Hanford_Work
+
+accounting_group_user = james.neeson
+accounting_group = ligo.dev.o4.burst.allsky.mlyoffline
+request_memory = 8G
+request_disk = 8G
+getenv = PATH,DEFAULT_SEGMENT_SERVER,GWDATAFIND_SERVER,NDSSERVER
+
+transfer_executable = false 
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+preserve_relative_paths = TRUE
+transfer_input_files = load_data.py, load_hveto.py, hveto_triggers.txt, ligo.org.keytab
+transfer_output_files = data/shards/glitches_$(Process).h5
+
+log = condor/gen_data/logs/logs_$(Process).log
+output = condor/gen_data/outputs/outputs_$(Process).out
+error = condor/gen_data/errors/errors_$(Process).err
+
+max_retries = 10
+
+queue 100
