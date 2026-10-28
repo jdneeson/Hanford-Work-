@@ -146,6 +146,8 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data1 = np.asarray(data1, dtype=float)
     data2 = np.asarray(data2, dtype=float)
 
+    data2 = np.roll(data2, 1000)
+
     if restrict_to_trigger:
     # Restrict to 2s either side of trigger 
         start_idx = int(8 * 1/dt)      # Currently hardcoded for convenience 
@@ -159,17 +161,18 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
         raise ValueError('data1 and data2 must have the same shape')
 
     # Break each event into sliding windows with specified overlap
-    data1_windows, segment_size = sliding_window(data1, 4, 0.5, 3.99, 1/dt) 
-    data2_windows = sliding_window(data2, 4, 0.5, 3.99, 1/dt)[0] 
+    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.499, 1/dt) 
+    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.499, 1/dt)
 
     print(len(data1_windows))
+    data2_windows = np.array(data2_windows)
+    fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size) 
 
     # For each window in A, calculate the cross-correlation with every window in B in a vectorised manner 
     a_corrs = [] 
     for i, window in enumerate(data1_windows):
         #print(i)
         fft1 = np.fft.rfft(window, n=segment_size)
-        fft2 = np.fft.rfft(b_windows, axis=1, n=segment_size) 
 
         correlations = np.fft.ifft(
             fft1[None, :] * np.conjugate(fft2),    # Numpy broadcasting 
@@ -305,7 +308,7 @@ def test():
         filename=DATA_FILE,
     )
     test_event2 = load_event(
-        'event_1396943944.000000',#'event_1397903973.529297',
+        'event_1422389861.000000',#'event_1397903973.529297',
         filename=DATA_FILE,
     )
     event = prepare_event(test_event)
