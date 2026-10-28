@@ -146,8 +146,6 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data1 = np.asarray(data1, dtype=float)
     data2 = np.asarray(data2, dtype=float)
 
-    #data2 = np.roll(data2, 1000)
-
     if restrict_to_trigger:
     # Restrict to 2s either side of trigger 
         start_idx = int(8 * 1/dt)      # Currently hardcoded for convenience 
@@ -177,10 +175,8 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.499, 1/dt) 
     data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.499, 1/dt)
 
-    if (np.asarray(data1_windows)).all() == (np.asarray(data2_windows)).all():
-        print('1st Check: True')
-    else: 
-        print('1st Check: False')
+    data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True) 
+    data2_windows /= np.linalg.norm(data2_windows, axis=1, keepdims=True) 
 
     #print(len(data1_windows))
     data2_windows = np.array(data2_windows)
@@ -192,14 +188,10 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
         #print(i)
         fft1 = np.fft.rfft(window, n=segment_size)
 
-        if fft1.all() == fft2[i,:].all():
-            print('True')
-        else:
-            print('False')
-
-        correlations = np.fft.ifft(
+        correlations = np.fft.irfft(
             fft1[None, :] * np.conjugate(fft2),    # Numpy broadcasting 
             axis=1,
+            n=segment_size,
         )
         #print(f'Correlations: {correlations}')
 
@@ -324,7 +316,7 @@ def test():
     
 
 if __name__ == '__main__':
-    test()
+    main()
 
 '''
 Simple plot of aligned glitches to look for similar morphology 
