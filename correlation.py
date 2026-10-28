@@ -146,7 +146,7 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data1 = np.asarray(data1, dtype=float)
     data2 = np.asarray(data2, dtype=float)
 
-    data2 = np.roll(data2, 1000)
+    #data2 = np.roll(data2, 1000)
 
     if restrict_to_trigger:
     # Restrict to 2s either side of trigger 
@@ -160,35 +160,6 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     if data1.shape != data2.shape:
         raise ValueError('data1 and data2 must have the same shape')
 
-    # Break each event into sliding windows with specified overlap
-    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.499, 1/dt) 
-    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.499, 1/dt)
-
-    print(len(data1_windows))
-    data2_windows = np.array(data2_windows)
-    fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size) 
-
-    # For each window in A, calculate the cross-correlation with every window in B in a vectorised manner 
-    a_corrs = [] 
-    for i, window in enumerate(data1_windows):
-        #print(i)
-        fft1 = np.fft.rfft(window, n=segment_size)
-
-        correlations = np.fft.ifft(
-            fft1[None, :] * np.conjugate(fft2),    # Numpy broadcasting 
-            axis=1,
-        )
-        #print(f'Correlations: {correlations}')
-
-        a_corrs.append(np.max(np.abs(correlations))) 
-
-    print(len(a_corrs))
-    # Take the maximum for all As and return it 
-    max_corr = np.max(np.asarray(a_corrs)) 
-
-    return max_corr 
-
-'''
     n = data1.size
 
     #if n == 0 or n & (n - 1):
@@ -202,8 +173,43 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     # Multiplication by the complex conjugate gives the correlation.
     ans = np.fft.irfft(fft1 * np.conjugate(fft2), n=fftlength)
 
-    return ans 
-'''
+    # Break each event into sliding windows with specified overlap
+    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.499, 1/dt) 
+    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.499, 1/dt)
+
+    if (np.asarray(data1_windows)).all() == (np.asarray(data2_windows)).all():
+        print('1st Check: True')
+    else: 
+        print('1st Check: False')
+
+    #print(len(data1_windows))
+    data2_windows = np.array(data2_windows)
+    fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size) 
+
+    # For each window in A, calculate the cross-correlation with every window in B in a vectorised manner 
+    a_corrs = [] 
+    for i, window in enumerate(data1_windows):
+        #print(i)
+        fft1 = np.fft.rfft(window, n=segment_size)
+
+        if fft1.all() == fft2[i,:].all():
+            print('True')
+        else:
+            print('False')
+
+        correlations = np.fft.ifft(
+            fft1[None, :] * np.conjugate(fft2),    # Numpy broadcasting 
+            axis=1,
+        )
+        #print(f'Correlations: {correlations}')
+
+        a_corrs.append(np.max(np.abs(correlations))) 
+
+    print(len(a_corrs))
+    # Take the maximum for all As and return it 
+    max_corr = np.max(np.asarray(a_corrs)) 
+
+    return max_corr, ans
 
 ####################################################################
 
@@ -313,8 +319,8 @@ def test():
     )
     event = prepare_event(test_event)
     event2 = prepare_event(test_event2)
-    correlation = corr(event['strain'], event2['strain'], event['dt'])
-    print(correlation)
+    correlation, old_correlation = corr(event['strain'], event2['strain'], event['dt'])
+    print(correlation, np.max(old_correlation))
     
 
 if __name__ == '__main__':
