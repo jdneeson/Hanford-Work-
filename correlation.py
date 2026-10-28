@@ -8,9 +8,18 @@ from load_data import iter_events, load_event
 
 #########################################
 
-DATA_FILE = 'data/hveto_glitches.h5'
+'''
+- Split each event into sliding windows 
+- For each A, calculate max correlation with all Bs; can be vectorised with matrices 
+- Take max of those and store it. Loop over this process to do it for all As. 
+- Compare the overall maximum to the threshold 
+'''
+
+
+DATA_FILE = 'data/test_templates.h5'
 threshold = 0.8   # ~0.5 for 0 false negatives, ~0.8 for no false positives
 
+# Old template bank when using strain channel 
 selected_names = {
     'event_1396832853.000000',
     #'event_1396841611.000000',  
@@ -79,15 +88,59 @@ def prepare_event(event):
         'dt' : dt,
     }
 
+def sliding_window(data, signal_duration, segment_length, overlap_length, sample_rate, ):
+    
+    """
+    Splits a signal into overlapping windows 
+
+    Parameters
+    ----------
+    data: array-like
+        The signal that you want to split into sections 
+    
+    signal_duration: float
+        The duration of the entire signal, in seconds.
+
+    segment_length: float
+        The desired length of each window, in seconds. 
+
+    overlap_length: float
+        The desired overlap between consecutive windows, in seconds. 
+
+    sample_rate: float 
+        The sample rate of the signal, in Hz. 
+
+    """
+    data_size = int(signal_duration*sample_rate)                         
+    segment_size = int(segment_length*sample_rate)                          
+    overlap_size = int(overlap_length*sample_rate)  
+    step = int(segment_size - overlap_size)                                    
+    num_windows = int((data_size-segment_size)/(segment_size-overlap_size)) 
+
+    #create the indices to split the signal into overlapping chunks 
+    start_indices = []                                 
+    end_indices = [] 
+    for n in range(0, num_windows+1, 1): 
+        start_index = 0 + n*step 
+        start_indices.append(start_index) 
+        end_index = segment_size + n*step 
+        end_indices.append(end_index) 
+    start_indices = np.array(start_indices)
+    end_indices = np.array(end_indices)
+    #print(start_indices)
+    #print(end_indices)
+
+    #split the signal into overlapping chunks 
+    chunks = []
+    for i in range(len(start_indices)): 
+        chunk = data[start_indices[i]:end_indices[i]]
+        chunks.append(chunk)
+
+    return chunks, segment_size 
+
 def corr(data1, data2, dt, restrict_to_trigger=True):
     '''
-    Correlation in wraparound lag order.
-
-    ans[0]     = zero lag
-    ans[1:]    = increasingly positive lags
-    ans[n//2:] = increasingly negative lags, wrapping around
-
-    The input length must be the same power of two.
+    Calculates maximum correlation between sliding .5s windows of each event 
     '''
 
     data1 = np.asarray(data1, dtype=float)
@@ -105,6 +158,34 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     if data1.shape != data2.shape:
         raise ValueError('data1 and data2 must have the same shape')
 
+    # Break each event into sliding windows with specified overlap
+    data1_windows, segment_size = sliding_window(data1, 4, 0.5, 3.99, 1/dt) 
+    data2_windows = sliding_window(data2, 4, 0.5, 3.99, 1/dt)[0] 
+
+    print(len(data1_windows))
+
+    # For each window in A, calculate the cross-correlation with every window in B in a vectorised manner 
+    a_corrs = [] 
+    for i, window in enumerate(data1_windows):
+        #print(i)
+        fft1 = np.fft.rfft(window, n=segment_size)
+        fft2 = np.fft.rfft(b_windows, axis=1, n=segment_size) 
+
+        correlations = np.fft.ifft(
+            fft1[None, :] * np.conjugate(fft2),    # Numpy broadcasting 
+            axis=1,
+        )
+        #print(f'Correlations: {correlations}')
+
+        a_corrs.append(np.max(np.abs(correlations))) 
+
+    print(len(a_corrs))
+    # Take the maximum for all As and return it 
+    max_corr = np.max(np.asarray(a_corrs)) 
+
+    return max_corr 
+
+'''
     n = data1.size
 
     #if n == 0 or n & (n - 1):
@@ -119,6 +200,7 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     ans = np.fft.irfft(fft1 * np.conjugate(fft2), n=fftlength)
 
     return ans 
+'''
 
 ####################################################################
 
@@ -219,21 +301,21 @@ def main():
 
 def test():
     test_event = load_event(
-        'event_1398450883.000000',#'event_1398450883.292968',
+        'event_1422389861.000000',#'event_1398450883.292968',
         filename=DATA_FILE,
     )
     test_event2 = load_event(
-        'event_1397903973.000000',#'event_1397903973.529297',
+        'event_1396943944.000000',#'event_1397903973.529297',
         filename=DATA_FILE,
     )
     event = prepare_event(test_event)
     event2 = prepare_event(test_event2)
     correlation = corr(event['strain'], event2['strain'], event['dt'])
-    print(np.max(np.abs(correlation)))
+    print(correlation)
     
 
 if __name__ == '__main__':
-    main()
+    test()
 
 '''
 Simple plot of aligned glitches to look for similar morphology 
