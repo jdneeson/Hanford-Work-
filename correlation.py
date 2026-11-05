@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from gwpy.timeseries import TimeSeries
 
-from load_data import iter_events, load_event
+from old_load_data import iter_events, load_event
+from tqdm import tqdm 
+from pathlib import Path 
 
 #########################################
 
@@ -16,7 +18,7 @@ from load_data import iter_events, load_event
 '''
 
 
-DATA_FILE = 'data/test_templates.h5'
+DATA_FILE = 'data/O4b_glitches_test.h5'
 threshold = 0.8   # ~0.5 for 0 false negatives, ~0.8 for no false positives
 
 # Old template bank when using strain channel 
@@ -55,7 +57,7 @@ selected_names = {
     #'event_1398587917.000000',
     #'event_1398748571.000000',
     'event_1398984684.000000',   # Necessary for threshold of 0.5  # add back in
-    #'event_1399005063.000000',   # add back in 
+    'event_1399005063.000000',   # add back in 
     #'event_1399022424.000000',
     #'event_1399085885.000000',
     #'event_1399210049.000000',
@@ -143,8 +145,8 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     Calculates maximum correlation between sliding .5s windows of each event 
     '''
 
-    data1 = np.asarray(data1, dtype=float)
-    data2 = np.asarray(data2, dtype=float)
+    data1 = np.asarray(data1, dtype=np.float64)
+    data2 = np.asarray(data2, dtype=np.float64)
 
     if restrict_to_trigger:
     # Restrict to 2s either side of trigger 
@@ -170,38 +172,33 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
 
     # Multiplication by the complex conjugate gives the correlation.
     ans = np.fft.irfft(fft1 * np.conjugate(fft2), n=fftlength)
+    old_peak = (np.max(np.abs(ans)))
 
     # Break each event into sliding windows with specified overlap
-    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.499, 1/dt) 
-    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.499, 1/dt)
+    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.49, 1/dt) 
+    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.49, 1/dt)
 
+    data1_windows = np.asarray(data1_windows, dtype=np.float64)
+    data2_windows = np.asarray(data2_windows, dtype=np.float64)
+
+    # Normalise each window independently
     data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True) 
     data2_windows /= np.linalg.norm(data2_windows, axis=1, keepdims=True) 
 
-    #print(len(data1_windows))
-    data2_windows = np.array(data2_windows)
+    # Shape: (num_windows, freq_bin)
+    fft1 = np.fft.rfft(data1_windows, axis=1, n=segment_size)
     fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size) 
 
-    # For each window in A, calculate the cross-correlation with every window in B in a vectorised manner 
-    a_corrs = [] 
-    for i, window in enumerate(data1_windows):
-        #print(i)
-        fft1 = np.fft.rfft(window, n=segment_size)
+    # Broadcast to (fft1_windows, fft2_windows, freq_bin)
+    products = (fft1[:, np.newaxis, :] * np.conjugate(fft2[np.newaxis, :, :]))
 
-        correlations = np.fft.irfft(
-            fft1[None, :] * np.conjugate(fft2),    # Numpy broadcasting 
-            axis=1,
-            n=segment_size,
-        )
-        #print(f'Correlations: {correlations}')
+    # Calculate all cross-correlations in vectorised fashion
+    correlations = np.fft.irfft(products, axis=2, n=segment_size) 
 
-        a_corrs.append(np.max(np.abs(correlations))) 
+    # Maximum over fft1 windows, fft2 windows, and correlation lag 
+    new_peak = np.max(np.abs(correlations))
 
-    print(len(a_corrs))
-    # Take the maximum for all As and return it 
-    max_corr = np.max(np.asarray(a_corrs)) 
-
-    return max_corr, ans
+    return new_peak, old_peak
 
 ####################################################################
 
@@ -219,6 +216,7 @@ def main():
         raise ValueError(f'Selected events not found: {missing_names}') 
 
     events_that_pass = set()
+    new_events_that_pass = set() 
     all_names = set() 
 
     # Load and analyse the events that will only be used once one at a time using the iter_events() generator
@@ -231,30 +229,46 @@ def main():
         else:
             event_data = prepare_event(event) 
 
-        for selected_name, selected_event in selected_events.items():
+        for selected_name, selected_event in tqdm(
+            selected_events.items(),
+            total = len(selected_events), 
+            desc = f'comparing {event_name}',
+            ):
             if event_name == selected_name:
                 continue 
 
-            correlation = corr(
+            correlation, old_correlation = corr(
                 event_data['strain'],
                 selected_event['strain'],
                 event_data['dt'],
             )
 
-            peak_correlation = np.max(abs(correlation))
-
-            if peak_correlation >= threshold: 
+            if old_correlation >= threshold: 
                 events_that_pass.add(event_name)
                 break      # Only care if it meets the threshold once and want to avoid duplicates
+
+            if correlation >= threshold: 
+                new_events_that_pass.add(event_name)
+                break
 
     results = {
         'data_file' : DATA_FILE,
         'threshold' : threshold,
         'templates' : sorted(selected_names), 
-        'glitch_names' : sorted(events_that_pass),
+        'glitch_names' : sorted(new_events_that_pass),
+        'old_glitch_names' : sorted(events_that_pass),
         }
+
+    print(len(events_that_pass))
+    print(len(new_events_that_pass))
+
+    output_path = Path(correlation_results_O4b.json)
+    output_path.parent.mkdir(parents=True, exist_ok=True)  # Unnecessary unless creating a parent directory
+
+    plot_path = confusion_matrix_O4b.png
+    plot_path.parent.mkdir(parents=True, exist_ok=True)    # Unnecessary unless creating a parent directory
     
-    with open('correlation_results_O4b.json', 'w') as file:
+    with Path('correlation_results_O4b.json').open('w') as file:
         json.dump(results, file, indent=2)
 
     true_positives = selected_names & events_that_pass
@@ -298,7 +312,7 @@ def main():
 
     fig.colorbar(image, ax=ax, label='Number of events')
     fig.tight_layout()
-    fig.savefig('confusion_matrix_O4b.png', dpi=150)
+    fig.savefig(plot_path, dpi=150)
 
 def test():
     test_event = load_event(
