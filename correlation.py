@@ -162,6 +162,13 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
         end_idx = int(10 * 1/dt) 
         data1 = data1[start_idx:end_idx]
         data2 = data2[start_idx:end_idx]
+
+    # Break each event into sliding windows with specified overlap, before normalisation because they are normalised separately 
+    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.48, 1/dt) 
+    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.48, 1/dt)
+    data1_windows = np.asarray(data1_windows, dtype=np.float64)
+    data2_windows = np.asarray(data2_windows, dtype=np.float64)
+
     data1 = data1 / np.linalg.norm(data1)
     data2 = data2 / np.linalg.norm(data2) 
 
@@ -180,14 +187,7 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
 
     # Multiplication by the complex conjugate gives the correlation.
     ans = np.fft.irfft(fft1 * np.conjugate(fft2), n=fftlength)
-    old_peak = (np.max(np.abs(ans)))
-
-    # Break each event into sliding windows with specified overlap
-    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.48, 1/dt) 
-    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.48, 1/dt)
-
-    data1_windows = np.asarray(data1_windows, dtype=np.float64)
-    data2_windows = np.asarray(data2_windows, dtype=np.float64)
+    old_peak = (np.max(abs(ans)))
 
     # Normalise each window independently
     data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True) 
