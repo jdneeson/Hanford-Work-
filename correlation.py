@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from gwpy.timeseries import TimeSeries
 
-from old_load_data import iter_events, load_event
+from load_data import iter_events, load_event
 from tqdm import tqdm 
 from pathlib import Path 
+import argparse 
 
 #########################################
 
@@ -73,6 +74,13 @@ selected_names = {
 }
 
 #########################################
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--templates', type=Path, required=True)
+    parser.add_argument('--data', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    return parser.parse_args()
 
 def whiten(data, dt):
     data = TimeSeries(data, sample_rate = 1/dt) # Needs to be a timeseries to use whiten method 
@@ -175,8 +183,8 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     old_peak = (np.max(np.abs(ans)))
 
     # Break each event into sliding windows with specified overlap
-    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.49, 1/dt) 
-    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.49, 1/dt)
+    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.48, 1/dt) 
+    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.48, 1/dt)
 
     data1_windows = np.asarray(data1_windows, dtype=np.float64)
     data2_windows = np.asarray(data2_windows, dtype=np.float64)
@@ -202,12 +210,12 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
 
 ####################################################################
 
-def main():
+def main(args):
 
     selected_events = {}
 
     # Pre-load only the selected events that will be compared against all other events 
-    for event in iter_events(DATA_FILE):
+    for event in iter_events(args.templates):
         if event['name'] in selected_names:
             selected_events[event['name']] = prepare_event(event) 
 
@@ -217,26 +225,17 @@ def main():
 
     events_that_pass = set()
     new_events_that_pass = set() 
-    all_names = set() 
 
     # Load and analyse the events that will only be used once one at a time using the iter_events() generator
-    for event in iter_events(DATA_FILE):
+    for event in iter_events(args.data):
         event_name = event['name'] 
-        all_names.add(event_name) 
     
         if event_name in selected_events:
             event_data = selected_events[event_name]
         else:
             event_data = prepare_event(event) 
 
-        for selected_name, selected_event in tqdm(
-            selected_events.items(),
-            total = len(selected_events), 
-            desc = f'comparing {event_name}',
-            ):
-            if event_name == selected_name:
-                continue 
-
+        for selected_name, selected_event in selected_events.items():
             correlation, old_correlation = corr(
                 event_data['strain'],
                 selected_event['strain'],
@@ -252,25 +251,15 @@ def main():
                 break
 
     results = {
-        'data_file' : DATA_FILE,
-        'threshold' : threshold,
-        'templates' : sorted(selected_names), 
-        'glitch_names' : sorted(new_events_that_pass),
-        'old_glitch_names' : sorted(events_that_pass),
-        }
+        "templates": sorted(selected_names),
+        "glitch_names": sorted(new_events_that_pass),
+        "old_glitch_names": sorted(events_that_pass),
+    }
 
-    print(len(events_that_pass))
-    print(len(new_events_that_pass))
-
-    output_path = Path(correlation_results_O4b.json)
-    output_path.parent.mkdir(parents=True, exist_ok=True)  # Unnecessary unless creating a parent directory
-
-    plot_path = confusion_matrix_O4b.png
-    plot_path.parent.mkdir(parents=True, exist_ok=True)    # Unnecessary unless creating a parent directory
+    args.output.parent.mkdir(parents=True, exist_ok=True)  
+    args.output.write_text(json.dumps(results, indent=2))
     
-    with Path('correlation_results_O4b.json').open('w') as file:
-        json.dump(results, file, indent=2)
-
+'''
     true_positives = selected_names & events_that_pass
     false_negatives = selected_names - events_that_pass
     false_positives = events_that_pass - selected_names
@@ -313,6 +302,7 @@ def main():
     fig.colorbar(image, ax=ax, label='Number of events')
     fig.tight_layout()
     fig.savefig(plot_path, dpi=150)
+'''
 
 def test():
     test_event = load_event(
@@ -330,7 +320,7 @@ def test():
     
 
 if __name__ == '__main__':
-    main()
+    main(parse_args())
 
 '''
 Simple plot of aligned glitches to look for similar morphology 
