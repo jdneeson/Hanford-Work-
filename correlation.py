@@ -235,6 +235,9 @@ def main(args):
         else:
             event_data = prepare_event(event) 
 
+
+        old_passed = False
+        new_passed = False
         for selected_name, selected_event in selected_events.items():
             correlation, old_correlation = corr(
                 event_data['strain'],
@@ -243,12 +246,19 @@ def main(args):
             )
 
             if old_correlation >= threshold: 
-                events_that_pass.add(event_name)
-                break      # Only care if it meets the threshold once and want to avoid duplicates
+                old_passed = True 
 
             if correlation >= threshold: 
-                new_events_that_pass.add(event_name)
-                break
+                new_passed = True 
+
+            if old_passed and new_passed:
+                break 
+
+        if old_passed:
+            events_that_pass.add(event_name)
+
+        if new_passed:
+            new_events_that_pass.add(event_name)
 
     results = {
         "templates": sorted(selected_names),
@@ -306,7 +316,7 @@ def main(args):
 
 def test():
     test_event = load_event(
-        'event_1422389861.000000',#'event_1398450883.292968',
+        'event_1396832853.000000',#'event_1398450883.292968',
         filename=DATA_FILE,
     )
     test_event2 = load_event(
