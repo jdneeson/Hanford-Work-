@@ -157,7 +157,7 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data2 = np.asarray(data2, dtype=np.float64)
 
     if restrict_to_trigger:
-    # Restrict to 2s either side of trigger 
+    # Restrict to 2s after the trigger 
         start_idx = int(8 * 1/dt)      # Currently hardcoded for convenience 
         end_idx = int(10 * 1/dt) 
         data1 = data1[start_idx:end_idx]
@@ -169,6 +169,7 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data1_windows = np.asarray(data1_windows, dtype=np.float64)
     data2_windows = np.asarray(data2_windows, dtype=np.float64)
 
+    '''
     data1 = data1 / np.linalg.norm(data1)
     data2 = data2 / np.linalg.norm(data2) 
 
@@ -188,6 +189,7 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     # Multiplication by the complex conjugate gives the correlation.
     ans = np.fft.irfft(fft1 * np.conjugate(fft2), n=fftlength)
     old_peak = (np.max(abs(ans)))
+    '''
 
     # Normalise each window independently
     data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True) 
@@ -203,10 +205,22 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     # Calculate all cross-correlations in vectorised fashion
     correlations = np.fft.irfft(products, axis=2, n=segment_size) 
 
+    flat_index = np.argmax(np.abs(correlations))
+    event_window_index, template_window_index, lag_index = np.unravel_index(flat_index, correlations.shape)
+    
     # Maximum over fft1 windows, fft2 windows, and correlation lag 
     new_peak = np.max(np.abs(correlations))
 
-    return new_peak, old_peak
+    step = segment_size - int(0.48 * 1/dt)
+    event_window_start = int(event_window_index * step)
+    window_duration = 0.5
+
+    window_indices.update({
+        "event_window_start": event_window_start,
+        "event_window_end": event_window_start + segment_size,
+    })
+
+    return new_peak, window_indices
 
 ####################################################################
 
@@ -224,7 +238,6 @@ def main(args):
         raise ValueError(f'Selected events not found: {missing_names}') 
 
     events_that_pass = set()
-    new_events_that_pass = set() 
 
     # Load and analyse the events that will only be used once one at a time using the iter_events() generator
     for event in iter_events(args.data):
@@ -235,35 +248,24 @@ def main(args):
         else:
             event_data = prepare_event(event) 
 
-
-        old_passed = False
         new_passed = False
         for selected_name, selected_event in selected_events.items():
-            correlation, old_correlation = corr(
+            correlation, window_indices = corr(
                 event_data['strain'],
                 selected_event['strain'],
                 event_data['dt'],
             )
 
-            if old_correlation >= threshold: 
-                old_passed = True 
-
             if correlation >= threshold: 
                 new_passed = True 
-
-            if old_passed and new_passed:
-                break 
-
-        if old_passed:
-            events_that_pass.add(event_name)
+                break
 
         if new_passed:
-            new_events_that_pass.add(event_name)
+            events_that_pass.add(event_name)
 
     results = {
         "templates": sorted(selected_names),
-        "glitch_names": sorted(new_events_that_pass),
-        "old_glitch_names": sorted(events_that_pass),
+        "glitch_names": sorted(events_that_pass),
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)  
@@ -313,21 +315,6 @@ def main(args):
     fig.tight_layout()
     fig.savefig(plot_path, dpi=150)
 '''
-
-def test():
-    test_event = load_event(
-        'event_1396832853.000000',#'event_1398450883.292968',
-        filename=DATA_FILE,
-    )
-    test_event2 = load_event(
-        'event_1422389861.000000',#'event_1397903973.529297',
-        filename=DATA_FILE,
-    )
-    event = prepare_event(test_event)
-    event2 = prepare_event(test_event2)
-    correlation, old_correlation = corr(event['strain'], event2['strain'], event['dt'])
-    print(correlation, np.max(old_correlation))
-    
 
 if __name__ == '__main__':
     main(parse_args())
