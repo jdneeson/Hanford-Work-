@@ -20,7 +20,7 @@ import argparse
 
 
 DATA_FILE = 'data/O4b_glitches_test.h5'
-threshold = 0.8   # ~0.5 for 0 false negatives, ~0.8 for no false positives
+threshold = 0.82   # ~0.5 for 0 false negatives, ~0.8 for no false positives
 
 # Old template bank when using strain channel 
 selected_names = {
@@ -149,126 +149,123 @@ def sliding_window(data, signal_duration, segment_length, overlap_length, sample
     return chunks, segment_size 
 
 def corr(data1, data2, dt, restrict_to_trigger=True):
-    '''
-    Calculates maximum correlation between sliding .5s windows of each event 
-    '''
-
     data1 = np.asarray(data1, dtype=np.float64)
     data2 = np.asarray(data2, dtype=np.float64)
 
-    if restrict_to_trigger:
-    # Restrict to 2s after the trigger 
-        start_idx = int(8 * 1/dt)      # Currently hardcoded for convenience 
-        end_idx = int(10 * 1/dt) 
-        data1 = data1[start_idx:end_idx]
-        data2 = data2[start_idx:end_idx]
+    restriction_start = 0
+    restriction_end = len(data1)
 
-    # Break each event into sliding windows with specified overlap, before normalisation because they are normalised separately 
-    data1_windows, segment_size = sliding_window(data1, 2, 0.5, 0.48, 1/dt) 
-    data2_windows, segment_size = sliding_window(data2, 2, 0.5, 0.48, 1/dt)
+    if restrict_to_trigger:
+        sample_rate = 1.0 / dt
+        restriction_start = int(round(8 * sample_rate))
+        restriction_end = int(round(10 * sample_rate))
+
+        data1 = data1[restriction_start:restriction_end]
+        data2 = data2[restriction_start:restriction_end]
+
+    data1_windows, segment_size = sliding_window(
+        data1, 2, 1.5, 1.48, 1 / dt
+    )
+    data2_windows, segment_size = sliding_window(
+        data2, 2, 1.5, 1.48, 1 / dt
+    )
+
     data1_windows = np.asarray(data1_windows, dtype=np.float64)
     data2_windows = np.asarray(data2_windows, dtype=np.float64)
 
-    '''
-    data1 = data1 / np.linalg.norm(data1)
-    data2 = data2 / np.linalg.norm(data2) 
+    data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True)
+    data2_windows /= np.linalg.norm(data2_windows, axis=1, keepdims=True)
 
-    if data1.shape != data2.shape:
-        raise ValueError('data1 and data2 must have the same shape')
-
-    n = data1.size
-
-    #if n == 0 or n & (n - 1):
-    #    raise ValueError('input length must be a power of two')
-
-    fftlength = n 
-
-    fft1 = np.fft.rfft(data1)
-    fft2 = np.fft.rfft(data2)
-
-    # Multiplication by the complex conjugate gives the correlation.
-    ans = np.fft.irfft(fft1 * np.conjugate(fft2), n=fftlength)
-    old_peak = (np.max(abs(ans)))
-    '''
-
-    # Normalise each window independently
-    data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True) 
-    data2_windows /= np.linalg.norm(data2_windows, axis=1, keepdims=True) 
-
-    # Shape: (num_windows, freq_bin)
     fft1 = np.fft.rfft(data1_windows, axis=1, n=segment_size)
-    fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size) 
+    fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size)
 
-    # Broadcast to (fft1_windows, fft2_windows, freq_bin)
-    products = (fft1[:, np.newaxis, :] * np.conjugate(fft2[np.newaxis, :, :]))
+    correlations = np.fft.irfft(
+        fft1[:, np.newaxis, :] * np.conjugate(fft2[np.newaxis, :, :]),
+        axis=2,
+        n=segment_size,
+    )
 
-    # Calculate all cross-correlations in vectorised fashion
-    correlations = np.fft.irfft(products, axis=2, n=segment_size) 
+    event_window_index, template_window_index, lag_index = np.unravel_index(
+        np.argmax(np.abs(correlations)),
+        correlations.shape,
+    )
 
-    flat_index = np.argmax(np.abs(correlations))
-    event_window_index, template_window_index, lag_index = np.unravel_index(flat_index, correlations.shape)
-    
-    # Maximum over fft1 windows, fft2 windows, and correlation lag 
-    new_peak = np.max(np.abs(correlations))
+    step = segment_size - int(round(1.48 * 1 / dt))
 
-    step = segment_size - int(0.48 * 1/dt)
-    event_window_start = int(event_window_index * step)
-    window_duration = 0.5
+    event_window_start = restriction_start + event_window_index * step
+    template_window_start = restriction_start + template_window_index * step
 
-    window_indices.update({
-        "event_window_start": event_window_start,
-        "event_window_end": event_window_start + segment_size,
-    })
+    window_indices = {
+        "event": {
+            "start": int(event_window_start),
+            "end": int(event_window_start + segment_size),
+        },
+        "template": {
+            "start": int(template_window_start),
+            "end": int(template_window_start + segment_size),
+        },
+        "lag": int(lag_index),
+    }
 
-    return new_peak, window_indices
+    return float(np.max(np.abs(correlations))), window_indices
 
 ####################################################################
 
 def main(args):
-
     selected_events = {}
 
-    # Pre-load only the selected events that will be compared against all other events 
+    # Load selected template events
     for event in iter_events(args.templates):
-        if event['name'] in selected_names:
-            selected_events[event['name']] = prepare_event(event) 
+        if event["name"] in selected_names:
+            selected_events[event["name"]] = prepare_event(event)
 
     missing_names = selected_names - selected_events.keys()
     if missing_names:
-        raise ValueError(f'Selected events not found: {missing_names}') 
+        raise ValueError(f"Selected events not found: {missing_names}")
 
-    events_that_pass = set()
+    matches = {}
 
-    # Load and analyse the events that will only be used once one at a time using the iter_events() generator
+    # Search every event
     for event in iter_events(args.data):
-        event_name = event['name'] 
-    
-        if event_name in selected_events:
-            event_data = selected_events[event_name]
-        else:
-            event_data = prepare_event(event) 
+        event_name = event["name"]
 
-        new_passed = False
+        event_data = (
+            selected_events[event_name]
+            if event_name in selected_events
+            else prepare_event(event)
+        )
+
+        best_match = None
+        best_correlation = -np.inf
+
         for selected_name, selected_event in selected_events.items():
             correlation, window_indices = corr(
-                event_data['strain'],
-                selected_event['strain'],
-                event_data['dt'],
+                event_data["strain"],
+                selected_event["strain"],
+                event_data["dt"],
             )
 
-            if correlation >= threshold: 
-                new_passed = True 
-                break
+            if correlation > best_correlation:
+                best_correlation = correlation
+                best_match = {
+                    "event_name": event_name,
+                    "template_name": selected_name,
+                    "correlation": float(correlation),
+                    "event_window": window_indices["event"],
+                    "template_window": window_indices["template"],
+                    "lag": window_indices["lag"],
+                }
 
-        if new_passed:
-            events_that_pass.add(event_name)
+        if best_correlation >= threshold:
+            matches[event_name] = best_match
 
     results = {
         "templates": sorted(selected_names),
-        "glitch_names": sorted(events_that_pass),
+        "glitch_names": sorted(matches),
+        "matches": [matches[name] for name in sorted(matches)],
     }
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)  
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2))
     
 '''

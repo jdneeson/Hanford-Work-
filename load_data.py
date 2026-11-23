@@ -8,7 +8,7 @@ from pathlib import Path
 
 ##################################################################
 
-DEFAULT_DATA_FILE = 'data/test_templates.h5'
+DEFAULT_DATA_FILE = 'data/O4b_glitches-ETM-SUS.h5'
 
 # O4c start time is 1422118818
 # O4c + 1 month is 1424710818 
@@ -18,7 +18,7 @@ DEFAULT_DATA_FILE = 'data/test_templates.h5'
 def grab_main_data(gps_times, output_file, ifo, host, port):
     ''' Grab the strain data given a set of GPS times '''
     
-    channels = [f'{ifo}:GDS-CALIB_STRAIN']   #[f'{ifo}:SUS-ETMX_L3_MASTER_OUT_UL_DQ']
+    channels = [f'{ifo}:SUS-ETMX_L3_MASTER_OUT_UL_DQ'] #[f'{ifo}:GDS-CALIB_STRAIN']   
     channel_names = ['calib']
     window_size = 16
     data_dict = {}
@@ -68,7 +68,7 @@ def grab_main_data(gps_times, output_file, ifo, host, port):
         data_dict = {}
 
 def save_glitch_data(filename, glitch_data, event_gps, ifo):
-    channels = [f'{ifo}:GDS-CALIB_STRAIN']   #[f'{ifo}:SUS-ETMX_L3_MASTER_OUT_UL_DQ']
+    channels = [f'{ifo}:SUS-ETMX_L3_MASTER_OUT_UL_DQ'] #[f'{ifo}:GDS-CALIB_STRAIN']   
     channel_names = ['calib']
 
     start, end = glitch_data['timespan']
@@ -195,64 +195,8 @@ def psd(timeseries):
     psd = timeseries.psd(fftlength=4, overlap=None, window='hann', method = 'welch')
     return psd 
 
-def plot_events(events):
-    
-    channel_names = ['calib', 'calib_highpass']
-
-    Path('template_plots').mkdir(exist_ok=True)
-
-    for event in events:
-        event_name = event['name']
-        event_gps = event['event_gps']
-        ifo = event['ifo']
-
-        fig, axes = plt.subplots(
-            1, 
-            len(channel_names),
-            figsize=(24, 6),
-            squeeze=False,
-        )
-
-        axes = axes[0] 
-
-        for column, channel_name in enumerate(channel_names):
-            axis = axes[column]
-
-            channel = event['channels'].get(channel_name)
-
-            if channel is None:
-                axis.set_visible(False)
-                continue
-
-            relative_time = channel['gps'] - event_gps
-
-            y_lim = [
-                (-4e5,4e5),
-                (-4e4,4e4),
-            ]
-
-            # Zoomed window around event trigger 
-            axis.plot(relative_time, channel['values'], linewidth=0.6)
-            axis.set_ylim(*y_lim[column])     # * tells python to unpack tuple 
-            axis.set_xlim(-2,2)
-            axis.set_ylabel(channel_name)
-            axis.set_title('Zoomed 2s window after trigger time')
-            axis.grid(True)
-
-        fig.suptitle(event_name)
-        fig.tight_layout()
-        fig.savefig(f'template_plots/{event_name}.png', dpi=180)
-        plt.close(fig)
-
 
 def whiten(data):
     data = ts.TimeSeries(data) # Needs to be a timeseries to use whiten method 
     white_data = data.whiten(4, 2, fduration=4, method='median')
     return white_data
-
-##################################################################
-
-if __name__ == '__main__':
-
-    for event in iter_events():
-        plot_events([event])

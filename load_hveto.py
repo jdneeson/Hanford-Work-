@@ -6,6 +6,7 @@ data around each trigger file into a hdf5 file
 import os
 from pathlib import Path
 import argparse 
+import csv 
 
 os.environ["NDS2_CLIENT_GAP_HANDLER"] = "STATIC_HANDLER_NEG_INF"
 os.environ["NDS2_CLIENT_ALLOW_DATA_ON_TAPE"] = '1'
@@ -45,10 +46,17 @@ def select_batch(triggers, job_index, num_jobs):
     return triggers[start:end]
 
 def load_hveto(filename):
-    hveto_file = Path(filename)
-    hveto_triggers = set() 
+    with open(filename, newline="") as file:
+        reader = csv.reader(file)
+        next(reader, None)  # Skip header
 
-    with hveto_file.open() as f:
+        hveto_triggers = {
+            float(row[0])
+            for row in reader
+            if row and row[0].strip()
+        }
+
+    '''with hveto_file.open() as f:
         next(f, None)   # Skips the header, which is the name of each column (time, freq, snr, channel)
 
         for line_number, line in enumerate(f, start=2):
@@ -64,7 +72,7 @@ def load_hveto(filename):
                 continue 
             
             hveto_triggers.add(event_time) 
-    
+    '''
     return sorted(hveto_triggers)
 
 def main():

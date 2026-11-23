@@ -18,9 +18,9 @@ print(len(lockloss_times))
 with open('correlation_results_O4b.json', 'r') as file:
     correlated_glitches = json.load(file)
 
-correlated_glitch_names = set(correlated_glitches['glitch_names']) 
+correlated_glitch_names = set(correlated_glitches['glitch_names']) | set(correlated_glitches['old_glitch_names'])
 
-with h5py.File('data/hveto_glitches.h5', 'r') as archive:
+with h5py.File('data/O4b_glitches_test.h5', 'r') as archive:
     selected_events = (
         archive['events'][name] 
         for name in correlated_glitch_names 
