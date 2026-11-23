@@ -80,6 +80,7 @@ def parse_args():
     parser.add_argument('--templates', type=Path, required=True)
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--template-windows', type=Path, required=True)
     return parser.parse_args()
 
 def whiten(data, dt):
@@ -93,9 +94,11 @@ def prepare_event(event):
     strain = whiten(channel['values'], dt)
 
     return {
-        'name' : event['name'],
-        'strain' : strain,
-        'dt' : dt,
+        'name': event['name'],
+        'event_gps': event['event_gps'],
+        'strain': np.asarray(strain, dtype=np.float64),
+        'gps': np.asarray(channel['gps'][:len(strain)], dtype=np.float64),
+        'dt': dt,
     }
 
 def sliding_window(data, signal_duration, segment_length, overlap_length, sample_rate, ):

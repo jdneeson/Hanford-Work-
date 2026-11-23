@@ -1,0 +1,28 @@
+executable = /usr/bin/env
+arguments = python correlation.py \
+            --templates data/correlation_templates.h5 \
+            --data data/correlation_shards/events_$(Process).h5 \
+            --output correlation_results_$(Process).json 
+
+initialdir = /home/james.neeson/Hanford-Work-
+
+accounting_group_user = james.neeson
+accounting_group = ligo.dev.o4.burst.allsky.mlyoffline
+request_memory = 32G
+request_disk = 32G
+getenv = PATH,DEFAULT_SEGMENT_SERVER,GWDATAFIND_SERVER,NDSSERVER
+
+transfer_executable = false 
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+preserve_relative_paths = TRUE
+transfer_input_files = load_data.py, data/correlation_templates.h5, data/correlation_shards/events_$(Process).h5, correlation.py
+transfer_output_files = correlation_results_$(Process).json
+
+log = condor/logs/corr_log.log
+output = condor/outputs/corr_outputs_$(Prcoess).out
+error = condor/errors/corr_errs_$(Process).err
+
+max_retries = 10
+
+queue 100
