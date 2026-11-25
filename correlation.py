@@ -3,6 +3,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 from gwpy.timeseries import TimeSeries
+from scipy.signal import correlate 
 
 from load_data import iter_events, load_event
 from tqdm import tqdm 
@@ -19,8 +20,8 @@ import argparse
 '''
 
 
-DATA_FILE = 'data/O4b_glitches_test.h5'
-threshold = 0.82   # ~0.5 for 0 false negatives, ~0.8 for no false positives
+DATA_FILE = 'data/correlation_shards/'   #'data/O4b_glitches_test.h5'
+threshold = 0.30   # ~0.5 for 0 false negatives, ~0.8 for no false positives
 
 # Old template bank when using strain channel 
 selected_names = {
@@ -156,47 +157,73 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
     data2 = np.asarray(data2, dtype=np.float64)
 
     restriction_start = 0
-    restriction_end = len(data1)
-
     if restrict_to_trigger:
         sample_rate = 1.0 / dt
         restriction_start = int(round(8 * sample_rate))
         restriction_end = int(round(10 * sample_rate))
-
         data1 = data1[restriction_start:restriction_end]
-        data2 = data2[restriction_start:restriction_end]
 
-    data1_windows, segment_size = sliding_window(
-        data1, 2, 1.5, 1.48, 1 / dt
-    )
-    data2_windows, segment_size = sliding_window(
-        data2, 2, 1.5, 1.48, 1 / dt
-    )
+    segment_size = int(round(0.1 * 1.0 / dt))
+    step = int(round(0.01/dt))
 
+    if len(data2) != segment_size:
+        raise ValueError(
+            f"Fixed template must contain 0.1 s: expected "
+            f"{segment_size} samples, got {len(data2)}"
+        )
+
+    if len(data1) < segment_size:
+        return 0.0, None
+
+    data1_windows = [
+        data1[start:start + segment_size]
+        for start in range(
+            0,
+            len(data1) - segment_size + 1,
+            step,
+        )
+    ]
     data1_windows = np.asarray(data1_windows, dtype=np.float64)
-    data2_windows = np.asarray(data2_windows, dtype=np.float64)
 
-    data1_windows /= np.linalg.norm(data1_windows, axis=1, keepdims=True)
-    data2_windows /= np.linalg.norm(data2_windows, axis=1, keepdims=True)
+    event_norms = np.linalg.norm(data1_windows, axis=1)
+    template_norm = np.linalg.norm(data2)
+
+    valid_windows = (
+        (event_norms != 0)
+        & (template_norm != 0)
+    )
+    if not np.any(valid_windows):
+        return 0.0, None
+
+    data1_windows = data1_windows[valid_windows]
+    data1_windows /= np.linalg.norm(
+        data1_windows,
+        axis=1,
+        keepdims=True,
+    )
+
+    normalized_template = data2 / template_norm
 
     fft1 = np.fft.rfft(data1_windows, axis=1, n=segment_size)
-    fft2 = np.fft.rfft(data2_windows, axis=1, n=segment_size)
+    fft2 = np.fft.rfft(normalized_template, n=segment_size)
 
     correlations = np.fft.irfft(
-        fft1[:, np.newaxis, :] * np.conjugate(fft2[np.newaxis, :, :]),
-        axis=2,
+        fft1 * np.conjugate(fft2),
+        axis=1,
         n=segment_size,
     )
 
-    event_window_index, template_window_index, lag_index = np.unravel_index(
+    valid_indices = np.flatnonzero(valid_windows)
+    event_window_offset, lag_index = np.unravel_index(
         np.argmax(np.abs(correlations)),
         correlations.shape,
     )
+    event_window_index = valid_indices[event_window_offset]
 
-    step = segment_size - int(round(1.48 * 1 / dt))
-
-    event_window_start = restriction_start + event_window_index * step
-    template_window_start = restriction_start + template_window_index * step
+    event_window_start = (
+        restriction_start
+        + event_window_index * step
+    )
 
     window_indices = {
         "event": {
@@ -204,23 +231,41 @@ def corr(data1, data2, dt, restrict_to_trigger=True):
             "end": int(event_window_start + segment_size),
         },
         "template": {
-            "start": int(template_window_start),
-            "end": int(template_window_start + segment_size),
+            "start": 0,
+            "end": int(segment_size),
         },
         "lag": int(lag_index),
     }
 
-    return float(np.max(np.abs(correlations))), window_indices
+    return (
+        float(np.max(np.abs(correlations))),
+        window_indices,
+    )
 
 ####################################################################
 
 def main(args):
+    template_windows = json.loads(args.template_windows.read_text())
     selected_events = {}
 
-    # Load selected template events
     for event in iter_events(args.templates):
-        if event["name"] in selected_names:
-            selected_events[event["name"]] = prepare_event(event)
+        if event['name'] not in selected_names:
+            continue
+
+        prepared = prepare_event(event)
+        selection = template_windows[event['name']]
+
+        start_s = float(selection['start_s'])
+        end_s = float(selection['end_s'])
+
+        dt = prepared['dt']
+        segment_size = int(round(0.1 / dt))
+
+        start_idx = int(round(8 + start_s / dt))
+        end_idx = int(round(8 + end_s / dt))
+
+        prepared['strain'] = prepared['strain'][start_idx:end_idx][:segment_size]
+        selected_events[event['name']] = prepared
 
     missing_names = selected_names - selected_events.keys()
     if missing_names:
@@ -232,11 +277,7 @@ def main(args):
     for event in iter_events(args.data):
         event_name = event["name"]
 
-        event_data = (
-            selected_events[event_name]
-            if event_name in selected_events
-            else prepare_event(event)
-        )
+        event_data = prepare_event(event)
 
         best_match = None
         best_correlation = -np.inf

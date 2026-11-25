@@ -149,10 +149,30 @@ def _read_event(archive, event_name):
 
     return event_data 
 
+'''
 def iter_events(filename=DEFAULT_DATA_FILE):
     with h5py.File(filename, 'r') as archive:
         for event_name in archive['events']:
             yield _read_event(archive, event_name) 
+'''
+
+def iter_events(filename=DEFAULT_DATA_FILE):
+    source = Path(filename)
+    files = sorted(source.glob("*.h5")) if source.is_dir() else [source]
+    seen = set()
+
+    for path in files:
+        with h5py.File(path, "r") as archive:
+            if "events" not in archive:
+                continue
+
+            for event_name in archive["events"]:
+                # If an event is in more than one file, use its first match.
+                if event_name in seen:
+                    continue
+                seen.add(event_name)
+
+                yield _read_event(archive, event_name)
 
 def load_event(event_name, filename=DEFAULT_DATA_FILE):
     with h5py.File(filename, 'r') as archive:

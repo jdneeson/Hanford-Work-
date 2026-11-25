@@ -1,9 +1,13 @@
 from pathlib import Path
+from tqdm import tqdm 
 
 import h5py
+import json 
 import matplotlib.pyplot as plt
 import numpy as np
 from gwpy.timeseries import TimeSeries
+
+from plot_data import plot_events 
 
 from xoptimalsnr import xoptimalsnr
 
@@ -11,82 +15,114 @@ from xoptimalsnr import xoptimalsnr
 # Load data and calculate metrics using xoptimalsnr
 ###########################################################
 
-input_file = 'data/test_glitches_new.h5'
-channel_name = 'calib_highpass' 
+input_file = 'data/O4b_glitches_test.h5'
+channel_name = 'calib' 
 
 results = [] 
 
+with open('correlation_results_test.json', 'r') as file:
+    correlated_glitches = json.load(file)
+    correlated_glitch_names = set(correlated_glitches['glitch_names']) | set(correlated_glitches['old_glitch_names'])
+
 with h5py.File(input_file, 'r') as archive:
-    for event_name, event in archive['events'].items():
-        channel = event['channels'][channel_name] 
+    events = archive['events']
 
-        waveform = np.asarray(channel['data'][:], dtype=np.float64)
-        gps = np.asarray(channel['gps'][:], dtype=np.float64)
+    selected_names = [
+        name for name in correlated_glitch_names
+        if name in events
+    ]
 
-        if waveform.size < 2:
-            print(f'Skipping {event_name}: too few samples')
-            continue
+    selected_events = (
+        (name, archive['events'][name])
+        for name in selected_names
+    )
 
-        if not np.all(np.isfinite(waveform)):
-            print(f'Skipping {event_name}: non-finite waveform values')
-            continue
+    for event in selected_events:
+        for event_name, event in tqdm(
+                selected_events,
+                total=len(selected_names),
+                desc='Calculating metrics',
+                unit='event',
+            ):
+            channel = event['channels'][channel_name] 
 
-        dt = np.median(np.diff(gps))
-        fs = 1/dt 
+            waveform = np.asarray(channel['data'][:], dtype=np.float64)
+            gps = np.asarray(channel['gps'][:], dtype=np.float64)
 
-        timeseries = TimeSeries(
-            waveform, 
-            sample_rate = fs
-        )
+            if waveform.size < 2:
+                print(f'Skipping {event_name}: too few samples')
+                continue
 
-        psd = timeseries.psd(
-            fftlength=4,
-            overlap=2,
-            method='median',
-            window='hann',
-        )
+            if not np.all(np.isfinite(waveform)):
+                print(f'Skipping {event_name}: non-finite waveform values')
+                continue
 
-        # xoptimalsnr expects shape (samples, polarisations)
-        h = waveform[:, np.newaxis]
+            dt = np.median(np.diff(gps))
+            fs = 1/dt 
 
-        metrics = xoptimalsnr(
-            h=h,
-            t0=0.0,    # This is relative time for the trigger
-            fs=fs,
-            S=psd.value,
-            F0=psd.frequencies.value,
-            dF=None,
-            Fmin=25,   # Data is highpassed at 20Hz
-            Fmax=fs/2, # Nyquist frequency 
-        )
+            peak_idx = np.argmax(np.abs(waveform))
 
-        (
-            snr,
-            h_rss,
-            h_peak,
-            fchar,
-            bandwidth,
-            tchar,
-            duration,
-            tchar_weighted,
-            duration_weighted,
-            tfbox,       # Currently omitted, not scalar so would need to be stored differently 
-            h_weighted,  # Not stored to keep memory costs low, will need to modify if it would be useful later 
-        ) = metrics
+            half_window = int(round(0.2*fs))
+            start = max(0, peak_idx - int(half_window/2))
+            end = min(waveform.size, peak_idx + half_window)
 
-        results.append({
-            'event_name': event_name,
-            'event_gps': event.attrs['event_gps'],
-            'snr': snr,
-            'h_rss': h_rss,
-            'h_peak': h_peak,
-            'fchar': fchar,
-            'bandwidth': bandwidth,
-            'tchar': tchar,
-            'duration': duration,
-            'tchar_weighted': tchar_weighted,
-            'duration_weighted': duration_weighted,
-        })
+            waveform_window = waveform[start:end]
+            t0 = (peak_idx - start) / fs 
+
+            timeseries = TimeSeries(
+                waveform, 
+                sample_rate = fs
+            )
+
+            # PSD still calculated from full data, is this correct? 
+            psd = timeseries.psd(
+                fftlength=4,
+                overlap=2,
+                method='median',
+                window='hann',
+            )
+
+            # xoptimalsnr expects shape (samples, polarisations)
+            h = waveform_window[:, np.newaxis]
+
+            metrics = xoptimalsnr(
+                h=h,
+                t0=t0,    # This is relative time for the trigger
+                fs=fs,
+                S=psd.value,
+                F0=psd.frequencies.value,
+                dF=None,
+                Fmin=25,   # Data is highpassed at 25Hz
+                Fmax=fs/2, # Nyquist frequency 
+            )
+
+            (
+                snr,
+                h_rss,
+                h_peak,
+                fchar,
+                bandwidth,
+                tchar,
+                duration,
+                tchar_weighted,
+                duration_weighted,
+                tfbox,       # Currently omitted, not scalar so would need to be stored differently 
+                h_weighted,  # Not stored to keep memory costs low, will need to modify if it would be useful later 
+            ) = metrics
+
+            results.append({
+                'event_name': event_name,
+                'event_gps': event.attrs['event_gps'],
+                'snr': snr,
+                'h_rss': h_rss,
+                'h_peak': h_peak,
+                'fchar': fchar,
+                'bandwidth': bandwidth,
+                'tchar': tchar,
+                'duration': duration,
+                'tchar_weighted': tchar_weighted,
+                'duration_weighted': duration_weighted,
+            })
 
 print(f'Calculated metrics for {len(results)} events')
 
@@ -143,7 +179,7 @@ with h5py.File(input_file, 'r+') as archive:
 # Plot results 
 #####################################################################
 
-plot_directory = Path('plots/timefreq_metrics')
+plot_directory = Path('plots/timefreq_metrics/test')
 plot_directory.mkdir(parents=True, exist_ok=True)
 
 plot_fields = [
@@ -176,7 +212,7 @@ with h5py.File(input_file, 'r') as archive:
 
         ax.hist(
             values,
-            bins=30,
+            bins=100,
             color='steelblue',
             alpha=0.75,
             edgecolor='black',
